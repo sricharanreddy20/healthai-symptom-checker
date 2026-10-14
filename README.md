@@ -226,4 +226,14 @@ These checks ran through the running app with a real Gemini key:
   - Found during live testing: the original default model, `gemini-2.5-flash`, is retired for new keys, and the newest Flash models were overloaded. This led to the model comparison and the automatic fallback described above.
   - Found during live testing: a missing model was reported to patients as *"please rephrase"*. It is now reported as a configuration error.
   - Found during live testing: a hung model held the request for 30 s before falling back. The total time budget was lowered from 60 s to 45 s.
-- _TODO (author): add your own review notes here, e.g. what you read line by line and what you changed._
+
+### My own review and decisions (author)
+
+- **Choosing the stack.** After a first version in TypeScript with Claude as the model, I had the back end rebuilt in Python with Google Gemini. Python is the language I can best explain and maintain, and I wanted the app to run on my own Gemini API key.
+- **The speed–quality trade-off.** When new answers took 5–7 s, I compared measured options: a lighter model at about 2 s, or reduced thinking at about 4 s. I chose the more thorough model, because answer quality matters more than speed for health questions. The progress messages make the wait feel shorter, and the cache removes it entirely for repeat queries.
+- **The design.** I chose a chat-style layout, modelled on modern AI chat apps, so patients see a pattern they already know, while keeping HealthAI's own teal colours.
+- **Bugs I found by hand.**
+  - In the browser, *Clear history* did nothing, because some embedded browsers block `window.confirm()`. I reported it and confirmed the in-page confirmation fix.
+  - On my phone (Safari in a private tab, and Chrome), the page loaded, but every symptom check failed with *"Can't reach HealthAI"*. The cause was that browsers only provide `crypto.randomUUID()` on HTTPS or localhost pages. After the fix, I re-tested on the phone and confirmed it works.
+- **Understanding the code.** I reviewed each module and can explain the request flow, the cache key and normalisation, the in-flight de-duplication, and the model fallback logic.
+- **Checking against the brief.** Before recording the demo, I went through every requirement and deliverable to confirm each one is covered.
