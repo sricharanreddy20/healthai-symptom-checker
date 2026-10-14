@@ -23,17 +23,29 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- Anonymous client id (scopes history to this browser) ----------
 
+// crypto.randomUUID() only exists in secure contexts (https:// or localhost), so
+// opening the app from a phone via http://<computer-ip> needs this fallback.
+// crypto.getRandomValues() works everywhere; the result is a standard v4 UUID.
+function uuidV4() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function getClientId() {
   try {
     let id = localStorage.getItem("healthai.clientId");
     if (!id) {
-      id = crypto.randomUUID();
+      id = uuidV4();
       localStorage.setItem("healthai.clientId", id);
     }
     return id;
   } catch {
     // Storage blocked (private mode etc.): history lasts for this page load only.
-    return (getClientId.fallback ??= crypto.randomUUID());
+    return (getClientId.fallback ??= uuidV4());
   }
 }
 
@@ -48,15 +60,17 @@ class ApiError extends Error {
 
 async function api(path, { method = "GET", body } = {}) {
   const controller = new AbortController();
+  // Built outside the try below, so a bug here isn't misreported as a network problem.
+  const init = {
+    method,
+    headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: controller.signal,
+  };
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res;
   try {
-    res = await fetch(`/api${path}`, {
-      method,
-      headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
+    res = await fetch(`/api${path}`, init);
   } catch (err) {
     throw new ApiError(
       err.name === "AbortError"

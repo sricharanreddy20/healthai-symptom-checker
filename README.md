@@ -27,6 +27,8 @@ ruff check .        # lint
 mypy                # strict type check
 ```
 
+To try it from a phone on the same Wi-Fi, start it with `HOST=0.0.0.0 python -m app` and open `http://<your-computer's-IP>:8000` on the phone. (On a Mac, `ipconfig getifaddr en0` shows the IP.)
+
 All settings are listed in [`.env.example`](.env.example). They are validated at startup, and the server refuses to start with a clear message if one is invalid. Interactive API docs are served at `/api/docs`.
 
 ## How each requirement is met
@@ -219,6 +221,7 @@ These checks ran through the running app with a real Gemini key:
   - *Clear history* did nothing in some embedded browsers, which block `window.confirm()`. It now uses an in-page confirmation bar.
   - In the redesign, the "Emergency" urgency badge picked up the emergency banner's styles because they shared a CSS class. The banner now has its own class.
   - In the redesign, the input box's placeholder was cut off at phone width. The box now starts two lines tall.
+  - Found when testing on a phone: opening the app at `http://<computer-ip>:8000` failed with *"Can't reach HealthAI"*. Browsers only provide `crypto.randomUUID()` on HTTPS or localhost pages, so creating the client id threw an error, and the error was misreported as a network failure. The id now falls back to `crypto.getRandomValues()`, and only real network errors are reported as network errors.
   - The rate limiter was module-global, so it was shared across app instances and tests. It is now created per app.
   - Found during live testing: the original default model, `gemini-2.5-flash`, is retired for new keys, and the newest Flash models were overloaded. This led to the model comparison and the automatic fallback described above.
   - Found during live testing: a missing model was reported to patients as *"please rephrase"*. It is now reported as a configuration error.
