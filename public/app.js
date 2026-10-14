@@ -194,6 +194,7 @@ function updateCount() {
 
 async function loadHistory() {
   const list = $("history-list");
+  $("clear-confirm").hidden = true;
   showError("history-error", null);
   list.replaceChildren(el("li", "empty", "Loading…"));
   try {
@@ -242,13 +243,24 @@ function renderHistoryItem(record) {
   return li;
 }
 
+// An in-page confirmation instead of window.confirm(): native dialogs are
+// suppressed in some embedded/in-app browsers, which made the button a no-op.
+function showClearConfirm(show) {
+  $("clear-confirm").hidden = !show;
+  $("clear-history").hidden = show;
+  if (show) $("clear-cancel").focus();
+}
+
 async function clearHistory() {
-  if (!confirm("Delete all of your saved checks? This can't be undone.")) return;
+  $("clear-confirm-btn").disabled = true;
   try {
     await api("/history", { method: "DELETE" });
+    showClearConfirm(false);
     await loadHistory();
   } catch (err) {
     showError("history-error", err.message);
+  } finally {
+    $("clear-confirm-btn").disabled = false;
   }
 }
 
@@ -270,7 +282,12 @@ function route() {
 function init() {
   $("symptom-form").addEventListener("submit", onSubmit);
   $("symptoms").addEventListener("input", updateCount);
-  $("clear-history").addEventListener("click", clearHistory);
+  $("clear-history").addEventListener("click", () => showClearConfirm(true));
+  $("clear-cancel").addEventListener("click", () => {
+    showClearConfirm(false);
+    $("clear-history").focus();
+  });
+  $("clear-confirm-btn").addEventListener("click", clearHistory);
   window.addEventListener("hashchange", route);
   route();
 

@@ -72,6 +72,13 @@
         <button id="clear-history" type="button" class="btn btn-secondary">Clear history</button>
       </div>
       <p class="lead">Saved in this browser only. Select a check to see the full result.</p>
+      <div id="clear-confirm" class="confirm-bar" role="alertdialog" aria-labelledby="clear-confirm-text" hidden>
+        <p id="clear-confirm-text">Delete all of your saved checks? This can't be undone.</p>
+        <div class="confirm-actions">
+          <button id="clear-cancel" type="button" class="btn btn-ghost">Cancel</button>
+          <button id="clear-confirm-btn" type="button" class="btn btn-danger">Delete all</button>
+        </div>
+      </div>
       <div id="history-error" class="notice notice-error" role="alert" hidden></div>
       <ul id="history-list" class="history-list"></ul>
     </section>
