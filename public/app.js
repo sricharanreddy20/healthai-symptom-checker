@@ -1,9 +1,15 @@
 // HealthAI front end: no framework, no build step. All patient-provided and
 // model-provided text is rendered with textContent, never innerHTML.
 
-const MIN_LENGTH = 10; // keep in sync with src/domain/schemas.ts
+const MIN_LENGTH = 10; // keep in sync with app/domain/schemas.py
 const MAX_LENGTH = 1000;
 const REQUEST_TIMEOUT_MS = 90_000;
+const THINKING_STEPS = [
+  "Reading your symptoms…",
+  "Considering possible causes…",
+  "Weighing how urgent this is…",
+  "Writing up next steps…",
+];
 
 const URGENCY_LABELS = {
   self_care: "Self-care",
@@ -11,6 +17,7 @@ const URGENCY_LABELS = {
   urgent_care: "Urgent care today",
   emergency: "Emergency",
 };
+const SEX_LABELS = { female: "Female", male: "Male", other: "Other" };
 
 const $ = (id) => document.getElementById(id);
 
@@ -80,9 +87,10 @@ export function validateSymptoms(raw) {
 function setFieldError(message) {
   $("symptoms-error").textContent = message ?? "";
   $("symptoms").setAttribute("aria-invalid", message ? "true" : "false");
+  $("symptom-form").classList.toggle("has-error", Boolean(message));
 }
 
-// ---------- Rendering ----------
+// ---------- Rendering helpers ----------
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -91,22 +99,36 @@ function el(tag, className, text) {
   return node;
 }
 
+function svg(pathData) {
+  const ns = "http://www.w3.org/2000/svg";
+  const icon = document.createElementNS(ns, "svg");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", pathData);
+  icon.append(path);
+  return icon;
+}
+
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function fillList(ul, items) {
   ul.replaceChildren(...items.map((item) => el("li", "", item)));
 }
 
-function renderResult(record) {
-  const { analysis, redFlags, meta } = record;
-  const card = $("result-template").content.firstElementChild.cloneNode(true);
+function cloneTemplate(id) {
+  return $(id).content.firstElementChild.cloneNode(true);
+}
 
-  const isEmergency = redFlags.length > 0 || analysis.urgency === "emergency";
-  if (isEmergency) {
-    const box = card.querySelector(".emergency");
+function renderAnswer(record) {
+  const { analysis, redFlags, meta } = record;
+  const card = cloneTemplate("result-template");
+
+  if (redFlags.length > 0 || analysis.urgency === "emergency") {
+    const box = card.querySelector(".er-banner");
     box.hidden = false;
     box.querySelector(".emergency-text").textContent = redFlags.length
-      ? `Your description mentions: ${redFlags.join(", ")}. Call your local emergency number.`
+      ? `Your description mentions: ${redFlags.join(", ").toLowerCase()}. Call your local emergency number.`
       : "Your symptoms may need immediate attention. Call your local emergency number.";
   }
 
@@ -123,8 +145,16 @@ function renderResult(record) {
   for (const c of analysis.conditions) {
     const li = el("li", "condition");
     const head = el("div", "condition-head");
-    head.append(el("span", "condition-name", c.name), el("span", "likelihood", `${capitalize(c.likelihood)} likelihood`));
-    li.append(head, el("p", "", c.explanation), el("p", "next", `Next step: ${c.nextSteps}`));
+    const likelihood = el("span", "likelihood");
+    const meter = el("span", `meter l-${c.likelihood}`);
+    meter.setAttribute("aria-hidden", "true");
+    meter.append(el("i"), el("i"), el("i"));
+    likelihood.append(meter, `${capitalize(c.likelihood)} likelihood`);
+    head.append(el("span", "condition-name", c.name), likelihood);
+
+    const next = el("p", "next");
+    next.append(svg("M5 12h14M13 6l6 6-6 6"), el("span", "", c.nextSteps));
+    li.append(head, el("p", "", c.explanation), next);
     list.append(li);
   }
   if (analysis.conditions.length === 0) {
@@ -137,60 +167,116 @@ function renderResult(record) {
   return card;
 }
 
-function showError(id, message) {
-  const box = $(id);
-  box.textContent = message ?? "";
-  box.hidden = !message;
+function describeContext({ age, sex }) {
+  return [age !== undefined ? `Age ${age}` : null, sex ? SEX_LABELS[sex] : null].filter(Boolean).join(" · ");
 }
 
-// ---------- Check view ----------
+// ---------- Check view: conversation thread ----------
+
+function appendUserTurn(body) {
+  const turn = cloneTemplate("user-turn-template");
+  turn.querySelector(".bubble").textContent = body.symptoms;
+  turn.querySelector(".bubble-meta").textContent = describeContext(body);
+  $("thread").append(turn);
+}
+
+function appendThinkingTurn() {
+  const turn = cloneTemplate("thinking-template");
+  const text = turn.querySelector(".thinking-text");
+  let step = 0;
+  const timer = setInterval(() => {
+    step = Math.min(step + 1, THINKING_STEPS.length - 1);
+    text.textContent = THINKING_STEPS[step];
+  }, 2200);
+  $("thread").append(turn);
+  turn.scrollIntoView({ behavior: "smooth", block: "end" });
+  return {
+    replaceWith(content) {
+      clearInterval(timer);
+      const done = el("li", "turn turn-ai");
+      done.append(turn.querySelector(".ai-avatar").cloneNode(true), content);
+      turn.replaceWith(done);
+      return done;
+    },
+  };
+}
+
+function errorTurnContent(err) {
+  const redFlags = err.details?.redFlags;
+  const message = redFlags?.length
+    ? `${err.message} Important: your description mentions ${redFlags.join(", ").toLowerCase()}. If this is happening now, call your local emergency number.`
+    : err.message;
+  return el("p", "turn-error", message);
+}
 
 async function onSubmit(event) {
   event.preventDefault();
-  const symptoms = $("symptoms").value;
-  const error = validateSymptoms(symptoms);
+  const textarea = $("symptoms");
+  const error = validateSymptoms(textarea.value);
   setFieldError(error);
   if (error) {
-    $("symptoms").focus();
+    textarea.focus();
     return;
   }
 
-  const body = { symptoms: symptoms.trim() };
-  const age = $("age").value;
-  if (age !== "") body.age = Number(age);
+  const body = { symptoms: textarea.value.trim() };
+  if ($("age").value !== "") body.age = Number($("age").value);
   if ($("sex").value) body.sex = $("sex").value;
 
-  showError("request-error", null);
-  $("result").replaceChildren();
-  $("loading").hidden = false;
+  $("view-check").classList.remove("is-empty");
+  appendUserTurn(body);
+  textarea.value = "";
+  updateComposer();
+  const thinking = appendThinkingTurn();
   $("submit-btn").disabled = true;
+
+  let turn;
   try {
     const record = await api("/diagnoses", { method: "POST", body });
-    $("result").replaceChildren(renderResult(record));
+    turn = thinking.replaceWith(renderAnswer(record));
   } catch (err) {
-    const redFlags = err.details?.redFlags;
-    showError(
-      "request-error",
-      redFlags?.length
-        ? `${err.message} Important: your description mentions ${redFlags.join(", ")}. If this is happening now, call your local emergency number.`
-        : err.message,
-    );
+    turn = thinking.replaceWith(errorTurnContent(err));
   } finally {
-    $("loading").hidden = true;
     $("submit-btn").disabled = false;
+    textarea.focus();
   }
+  turn.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function updateCount() {
-  const length = $("symptoms").value.length;
-  $("symptoms-count").textContent = `${length} / ${MAX_LENGTH}`;
-  // Clear a stale error as soon as the input becomes valid.
-  if ($("symptoms").getAttribute("aria-invalid") === "true" && !validateSymptoms($("symptoms").value)) {
+function updateComposer() {
+  const textarea = $("symptoms");
+  // Grow with the content, like a chat input.
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+  $("symptoms-count").textContent = `${textarea.value.length} / ${MAX_LENGTH}`;
+  if (textarea.getAttribute("aria-invalid") === "true" && !validateSymptoms(textarea.value)) {
     setFieldError(null);
   }
 }
 
+function onComposerKeydown(event) {
+  // Enter sends, Shift+Enter adds a new line (ignored while an IME is composing).
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!$("submit-btn").disabled) $("symptom-form").requestSubmit();
+  }
+}
+
+function onSuggestion(event) {
+  const button = event.target.closest(".suggestion");
+  if (!button) return;
+  $("symptoms").value = button.dataset.text;
+  updateComposer();
+  $("symptoms").focus();
+}
+
 // ---------- History view ----------
+
+function emptyState(message) {
+  const li = el("li", "empty");
+  li.append(svg("M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"), message);
+  return li;
+}
 
 async function loadHistory() {
   const list = $("history-list");
@@ -200,7 +286,7 @@ async function loadHistory() {
   try {
     const { items } = await api("/history");
     if (items.length === 0) {
-      list.replaceChildren(el("li", "empty", "No checks yet. Your submissions will appear here."));
+      list.replaceChildren(emptyState("No checks yet. Your submissions will appear here."));
       $("clear-history").hidden = true;
       return;
     }
@@ -219,10 +305,10 @@ function renderHistoryItem(record) {
   button.setAttribute("aria-expanded", "false");
 
   const top = el("div", "history-top");
-  const when = new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const time = el("time", "", new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
+  time.dateTime = record.createdAt;
   const badge = el("span", `badge ${record.analysis.urgency}`, URGENCY_LABELS[record.analysis.urgency]);
-  top.append(el("time", "", when), badge);
-  top.querySelector("time").dateTime = record.createdAt;
+  top.append(time, badge);
 
   const names = record.analysis.conditions.map((c) => c.name).join(" · ") || "No specific conditions";
   button.append(top, el("p", "history-symptoms", record.input.symptoms), el("p", "history-conditions", names));
@@ -234,13 +320,20 @@ function renderHistoryItem(record) {
       detail = null;
       button.setAttribute("aria-expanded", "false");
     } else {
-      detail = renderResult(record);
+      detail = el("div", "history-detail");
+      detail.append(renderAnswer(record));
       li.append(detail);
       button.setAttribute("aria-expanded", "true");
     }
   });
   li.append(button);
   return li;
+}
+
+function showError(id, message) {
+  const box = $(id);
+  box.textContent = message ?? "";
+  box.hidden = !message;
 }
 
 // An in-page confirmation instead of window.confirm(): native dialogs are
@@ -270,18 +363,21 @@ function route() {
   const view = location.hash === "#/history" ? "history" : "check";
   $("view-check").hidden = view !== "check";
   $("view-history").hidden = view !== "history";
-  for (const link of document.querySelectorAll("nav a")) {
+  for (const link of document.querySelectorAll(".segmented a")) {
     if (link.dataset.route === view) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
   if (view === "history") loadHistory();
+  else $("symptoms").focus({ preventScroll: true });
 }
 
 // ---------- Boot ----------
 
 function init() {
   $("symptom-form").addEventListener("submit", onSubmit);
-  $("symptoms").addEventListener("input", updateCount);
+  $("symptoms").addEventListener("input", updateComposer);
+  $("symptoms").addEventListener("keydown", onComposerKeydown);
+  $("suggestions").addEventListener("click", onSuggestion);
   $("clear-history").addEventListener("click", () => showClearConfirm(true));
   $("clear-cancel").addEventListener("click", () => {
     showClearConfirm(false);

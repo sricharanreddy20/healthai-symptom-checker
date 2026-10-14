@@ -2,105 +2,144 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>HealthAI Symptom Checker</title>
   <meta name="description" content="Describe your symptoms and get preliminary, AI-generated insight into possible causes.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230b6e69'/%3E%3Cpath d='M16 8v16M8 16h16' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" type="module"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="#/">Health<span>AI</span></a>
-      <nav aria-label="Main">
-        <a href="#/" data-route="check">Check symptoms</a>
-        <a href="#/history" data-route="history">History</a>
-      </nav>
-    </div>
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="HealthAI home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
+      <span class="brand-name">Health<span>AI</span></span>
+    </a>
+    <nav class="segmented" aria-label="Main">
+      <a href="#/" data-route="check">Check</a>
+      <a href="#/history" data-route="history">History</a>
+    </nav>
   </header>
 
-  <main class="container">
-    <div id="demo-banner" class="notice notice-info" hidden>
-      Demo mode: no API key is configured, so results come from a simple offline mock model.
+  <!-- ===================== Check view ===================== -->
+  <main id="view-check" class="view view-check is-empty">
+    <div id="demo-banner" class="pill-notice" hidden>
+      Demo mode · no API key configured, answers come from an offline mock model
     </div>
 
-    <!-- Check view -->
-    <section id="view-check" aria-labelledby="check-title">
-      <h1 id="check-title">What symptoms are you experiencing?</h1>
-      <p class="lead">Describe how you feel in your own words. Include when it started, how severe it is, and anything that makes it better or worse.</p>
+    <section class="hero" aria-labelledby="hero-title">
+      <span class="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/></svg>
+      </span>
+      <h1 id="hero-title">How are you feeling today?</h1>
+      <p class="hero-sub">Describe your symptoms in your own words. Include when they started and how severe they are.</p>
+    </section>
 
-      <form id="symptom-form" novalidate>
-        <label for="symptoms" class="label">Your symptoms</label>
-        <textarea id="symptoms" name="symptoms" rows="6" maxlength="1000"
-          placeholder="e.g. Sore throat and a mild fever since yesterday, plus a runny nose and feeling tired."
-          aria-describedby="symptoms-error symptoms-count"></textarea>
-        <div class="field-meta">
-          <p id="symptoms-error" class="field-error" role="alert"></p>
-          <span id="symptoms-count" class="char-count" aria-live="polite">0 / 1000</span>
-        </div>
+    <ol id="thread" class="thread" aria-live="polite"></ol>
 
-        <div class="row">
-          <div class="field">
-            <label for="age" class="label">Age <span class="optional">(optional)</span></label>
-            <input id="age" name="age" type="number" inputmode="numeric" min="0" max="120">
+    <div class="composer-dock">
+      <form id="symptom-form" class="composer" novalidate>
+        <label for="symptoms" class="visually-hidden">Your symptoms</label>
+        <textarea id="symptoms" name="symptoms" rows="2" maxlength="1000"
+          placeholder="e.g. Sore throat and a mild fever since yesterday, runny nose…"
+          aria-describedby="symptoms-error composer-hint"></textarea>
+
+        <div class="composer-bar">
+          <div class="chips-inline">
+            <label class="chip-field">
+              <span>Age</span>
+              <input id="age" name="age" type="number" inputmode="numeric" min="0" max="120" placeholder="—" aria-label="Age (optional)">
+            </label>
+            <label class="chip-field">
+              <span>Sex</span>
+              <select id="sex" name="sex" aria-label="Sex (optional)">
+                <option value="">—</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
           </div>
-          <div class="field">
-            <label for="sex" class="label">Sex <span class="optional">(optional)</span></label>
-            <select id="sex" name="sex">
-              <option value="">Prefer not to say</option>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-              <option value="other">Other</option>
-            </select>
+          <div class="composer-actions">
+            <span id="symptoms-count" class="char-count" aria-live="polite">0 / 1000</span>
+            <button id="submit-btn" type="submit" class="send" aria-label="Check symptoms">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg>
+            </button>
           </div>
         </div>
-
-        <button id="submit-btn" type="submit" class="btn">Check symptoms</button>
       </form>
+      <p id="symptoms-error" class="field-error" role="alert"></p>
 
-      <div id="request-error" class="notice notice-error" role="alert" hidden></div>
-      <div id="loading" class="loading" hidden aria-live="polite">
-        <span class="spinner" aria-hidden="true"></span> Analysing your symptoms…
+      <div id="suggestions" class="suggestions" aria-label="Example descriptions">
+        <button type="button" class="suggestion" data-text="Sore throat and a mild fever since yesterday, with a runny nose and feeling tired">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 1 1 4 0z"/></svg>Sore throat &amp; fever
+        </button>
+        <button type="button" class="suggestion" data-text="Throbbing headache on one side with nausea and sensitivity to light for 6 hours">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9 10h.01M15 10h.01M9 15c1.5-1 4.5-1 6 0"/></svg>Headache &amp; nausea
+        </button>
+        <button type="button" class="suggestion" data-text="Stomach cramps, diarrhoea and nausea since last night after eating out">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4c0 4 10 2 10 8s-6 8-10 8"/></svg>Upset stomach
+        </button>
+        <button type="button" class="suggestion" data-text="Itchy red rash on both forearms that appeared after gardening yesterday">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21c-4-4-7-7.5-7-11a7 7 0 0 1 14 0c0 3.5-3 7-7 11z"/></svg>Skin rash
+        </button>
       </div>
-      <div id="result" aria-live="polite"></div>
-    </section>
 
-    <!-- History view -->
-    <section id="view-history" aria-labelledby="history-title" hidden>
-      <div class="history-head">
-        <h1 id="history-title">Your previous checks</h1>
-        <button id="clear-history" type="button" class="btn btn-secondary">Clear history</button>
-      </div>
-      <p class="lead">Saved in this browser only. Select a check to see the full result.</p>
-      <div id="clear-confirm" class="confirm-bar" role="alertdialog" aria-labelledby="clear-confirm-text" hidden>
-        <p id="clear-confirm-text">Delete all of your saved checks? This can't be undone.</p>
-        <div class="confirm-actions">
-          <button id="clear-cancel" type="button" class="btn btn-ghost">Cancel</button>
-          <button id="clear-confirm-btn" type="button" class="btn btn-danger">Delete all</button>
-        </div>
-      </div>
-      <div id="history-error" class="notice notice-error" role="alert" hidden></div>
-      <ul id="history-list" class="history-list"></ul>
-    </section>
-
-    <p class="disclaimer">
-      HealthAI provides general information, not medical advice or a diagnosis. Always consult a qualified
-      healthcare professional. If you think you are having a medical emergency, call your local emergency number immediately.
-    </p>
+      <p id="composer-hint" class="fineprint">
+        HealthAI can make mistakes and is not a substitute for a doctor. In an emergency, call your local emergency number.
+      </p>
+    </div>
   </main>
 
-  <template id="result-template">
-    <article class="result-card">
-      <div class="emergency" hidden>
-        <strong>Seek emergency care now.</strong>
-        <span class="emergency-text"></span>
+  <!-- ===================== History view ===================== -->
+  <main id="view-history" class="view view-history" hidden>
+    <div class="history-head">
+      <div>
+        <h1>Your previous checks</h1>
+        <p class="muted">Saved in this browser only. Select a check to see the full answer.</p>
       </div>
-      <div class="result-head">
+      <button id="clear-history" type="button" class="btn btn-quiet-danger">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+        Clear history
+      </button>
+    </div>
+    <div id="clear-confirm" class="confirm-bar" role="alertdialog" aria-labelledby="clear-confirm-text" hidden>
+      <p id="clear-confirm-text">Delete all of your saved checks? This can't be undone.</p>
+      <div class="confirm-actions">
+        <button id="clear-cancel" type="button" class="btn btn-ghost">Cancel</button>
+        <button id="clear-confirm-btn" type="button" class="btn btn-danger">Delete all</button>
+      </div>
+    </div>
+    <div id="history-error" class="notice notice-error" role="alert" hidden></div>
+    <ul id="history-list" class="history-list"></ul>
+  </main>
+
+  <!-- ===================== Templates ===================== -->
+  <template id="user-turn-template">
+    <li class="turn turn-user"><p class="bubble"></p><p class="bubble-meta"></p></li>
+  </template>
+
+  <template id="thinking-template">
+    <li class="turn turn-ai thinking">
+      <span class="ai-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/></svg></span>
+      <span class="thinking-text">Reading your symptoms…</span>
+    </li>
+  </template>
+
+  <template id="result-template">
+    <article class="answer">
+      <div class="er-banner" role="alert" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19zM12 10v4M12 17.5h.01"/></svg>
+        <div><strong>Seek emergency care now.</strong> <span class="emergency-text"></span></div>
+      </div>
+      <div class="answer-head">
         <span class="badge urgency"></span>
         <span class="meta"></span>
       </div>
       <p class="summary"></p>
-      <h2>Possible conditions</h2>
+      <h2 class="section-title">Possible conditions</h2>
       <ol class="conditions"></ol>
       <div class="extra">
         <section class="tips"><h3>What you can do now</h3><ul></ul></section>

@@ -33,7 +33,7 @@ All settings are listed in [`.env.example`](.env.example). They are validated at
 
 | Requirement | Where | How to see it |
 |---|---|---|
-| **Must:** symptom input UI | [`public/index.html`](public/index.html), [`public/app.js`](public/app.js) | Type symptoms and press *Check symptoms*. Age and sex are optional. |
+| **Must:** symptom input UI | [`public/index.html`](public/index.html), [`public/app.js`](public/app.js) | Type symptoms in the chat-style box and press Enter or the send button. Age and sex are optional, and the example chips fill in a sample description. |
 | **Must:** LLM returns potential diagnoses | [`app/llm/gemini_provider.py`](app/llm/gemini_provider.py) | Results show 2–5 conditions, each with a likelihood, an explanation and a next step, plus an urgency level. |
 | **Must:** validation (not empty, min length) | [`app/domain/schemas.py`](app/domain/schemas.py) (server), `validateSymptoms` in `app.js` (client) | Submitting an empty field shows *"Please describe your symptoms."* Text that is under 10 characters, over 1000 characters, or has no words is also rejected. |
 | **Should:** history | [`app/history/repository.py`](app/history/repository.py), the *History* tab | Every check is saved. Click an entry to expand the full result. *Clear history* deletes them all after an in-page confirmation. |
@@ -106,6 +106,8 @@ All errors use one shape: `{ "error": { "code", "message", "details?" } }`. JSON
 
 - **Python with FastAPI.** Pydantic models define the input rules, the shape the LLM must return, and the API responses all in one place. The same models generate the JSON schema sent to Gemini and the interactive docs at `/api/docs`. FastAPI is async, which suits a server that spends most of its time waiting on an LLM.
 - **No front-end framework.** The UI is two views, so plain HTML, CSS and JavaScript (an ES module) keep it simple with no build step. The front end and back end share only the JSON format, so the server could be replaced without touching the page.
+- **A chat-style interface.** The layout is modelled on modern AI chat apps: a centred greeting and input box, example chips, and a conversation thread with the input box docked at the bottom. Patients already know this pattern. Enter sends, and Shift+Enter adds a new line.
+- **Making the wait feel shorter.** New analyses take about 5–10 s. The UI shows an animated "thinking" indicator with progress messages ("Reading your symptoms…", "Considering possible causes…"), so the wait feels active instead of stalled. I considered a faster model (about 2 s) but chose answer quality for a medical use case. Repeat queries are instant thanks to the cache.
 
 ### Choosing the LLM
 
@@ -215,6 +217,8 @@ These checks ran through the running app with a real Gemini key:
   - Labels were over-capitalised ("Moderate Likelihood").
   - When the model's output failed schema validation, the API returned a 500 instead of a 502.
   - *Clear history* did nothing in some embedded browsers, which block `window.confirm()`. It now uses an in-page confirmation bar.
+  - In the redesign, the "Emergency" urgency badge picked up the emergency banner's styles because they shared a CSS class. The banner now has its own class.
+  - In the redesign, the input box's placeholder was cut off at phone width. The box now starts two lines tall.
   - The rate limiter was module-global, so it was shared across app instances and tests. It is now created per app.
   - Found during live testing: the original default model, `gemini-2.5-flash`, is retired for new keys, and the newest Flash models were overloaded. This led to the model comparison and the automatic fallback described above.
   - Found during live testing: a missing model was reported to patients as *"please rephrase"*. It is now reported as a configuration error.
