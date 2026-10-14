@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HealthAI Symptom Checker</title>
+  <meta name="description" content="Describe your symptoms and get preliminary, AI-generated insight into possible causes.">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#/">Health<span>AI</span></a>
+      <nav aria-label="Main">
+        <a href="#/" data-route="check">Check symptoms</a>
+        <a href="#/history" data-route="history">History</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="demo-banner" class="notice notice-info" hidden>
+      Demo mode: no API key is configured, so results come from a simple offline mock model.
+    </div>
+
+    <!-- Check view -->
+    <section id="view-check" aria-labelledby="check-title">
+      <h1 id="check-title">What symptoms are you experiencing?</h1>
+      <p class="lead">Describe how you feel in your own words. Include when it started, how severe it is, and anything that makes it better or worse.</p>
+
+      <form id="symptom-form" novalidate>
+        <label for="symptoms" class="label">Your symptoms</label>
+        <textarea id="symptoms" name="symptoms" rows="6" maxlength="1000"
+          placeholder="e.g. Sore throat and a mild fever since yesterday, plus a runny nose and feeling tired."
+          aria-describedby="symptoms-error symptoms-count"></textarea>
+        <div class="field-meta">
+          <p id="symptoms-error" class="field-error" role="alert"></p>
+          <span id="symptoms-count" class="char-count" aria-live="polite">0 / 1000</span>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="age" class="label">Age <span class="optional">(optional)</span></label>
+            <input id="age" name="age" type="number" inputmode="numeric" min="0" max="120">
+          </div>
+          <div class="field">
+            <label for="sex" class="label">Sex <span class="optional">(optional)</span></label>
+            <select id="sex" name="sex">
+              <option value="">Prefer not to say</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="submit-btn" type="submit" class="btn">Check symptoms</button>
+      </form>
+
+      <div id="request-error" class="notice notice-error" role="alert" hidden></div>
+      <div id="loading" class="loading" hidden aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span> Analysing your symptoms…
+      </div>
+      <div id="result" aria-live="polite"></div>
+    </section>
+
+    <!-- History view -->
+    <section id="view-history" aria-labelledby="history-title" hidden>
+      <div class="history-head">
+        <h1 id="history-title">Your previous checks</h1>
+        <button id="clear-history" type="button" class="btn btn-secondary">Clear history</button>
+      </div>
+      <p class="lead">Saved in this browser only. Select a check to see the full result.</p>
+      <div id="history-error" class="notice notice-error" role="alert" hidden></div>
+      <ul id="history-list" class="history-list"></ul>
+    </section>
+
+    <p class="disclaimer">
+      HealthAI provides general information, not medical advice or a diagnosis. Always consult a qualified
+      healthcare professional. If you think you are having a medical emergency, call your local emergency number immediately.
+    </p>
+  </main>
+
+  <template id="result-template">
+    <article class="result-card">
+      <div class="emergency" hidden>
+        <strong>Seek emergency care now.</strong>
+        <span class="emergency-text"></span>
+      </div>
+      <div class="result-head">
+        <span class="badge urgency"></span>
+        <span class="meta"></span>
+      </div>
+      <p class="summary"></p>
+      <h2>Possible conditions</h2>
+      <ol class="conditions"></ol>
+      <div class="extra">
+        <section class="tips"><h3>What you can do now</h3><ul></ul></section>
+        <section class="seek"><h3>Get medical help if</h3><ul></ul></section>
+        <section class="questions"><h3>A doctor may ask</h3><ul></ul></section>
+      </div>
+    </article>
+  </template>
+</body>
+</html>
