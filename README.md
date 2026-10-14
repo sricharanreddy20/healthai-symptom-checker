@@ -16,13 +16,13 @@ cp .env.example .env          # then add your GEMINI_API_KEY
 python -m app                 # http://localhost:8000
 ```
 
-- **With a `GEMINI_API_KEY`**, analysis uses Google Gemini. You can get a free key at https://aistudio.google.com/apikey.
+- **With a `GEMINI_API_KEY`**, analysis uses Google Gemini (`gemini-3.5-flash`, falling back to `gemini-3.1-flash-lite`). You can get a free key at https://aistudio.google.com/apikey.
 - **Without a key**, the app starts in **demo mode** with an offline keyword-based mock model. A banner in the UI says so. The mock waits 1.5 s on purpose, so the cache speed-up is still easy to see.
 
 Other commands:
 
 ```bash
-pytest              # 48 tests, no network needed
+pytest              # 52 tests, no network needed
 ruff check .        # lint
 mypy                # strict type check
 ```
@@ -51,7 +51,7 @@ flowchart LR
   S --> C{"TTL LRU cache"}
   C -- hit --> S
   C -- miss --> IF["In-flight<br/>de-duplication"] --> P["DiagnosisProvider"]
-  P --> G["GeminiProvider<br/>JSON-schema output"]
+  P --> G["GeminiProvider<br/>JSON-schema output<br/>+ fallback model"]
   P -.-> M["MockProvider<br/>(no API key / tests)"]
   S --> H[("SQLite<br/>history")]
   R -- "GET /api/history" --> H
@@ -109,7 +109,18 @@ All errors use one shape: `{ "error": { "code", "message", "details?" } }`. JSON
 
 ### Choosing the LLM
 
-- **Google Gemini (`gemini-2.5-flash` by default).** Flash models are fast and low-cost, and they have a free tier, which suits a prototype that patients use interactively. The model is an environment variable (`GEMINI_MODEL`), so a larger model can be tried without code changes. The trade-off is that a larger, slower model may reason more carefully about unusual symptom combinations. The deterministic red-flag screen and the "include serious conditions" prompt instruction reduce the risk of a fast model missing something serious.
+- **Google Gemini: `gemini-3.5-flash`, with `gemini-3.1-flash-lite` as a fallback.** Flash models are fast and low-cost, and they have a free tier, which suits a prototype that patients use interactively. I compared the models available to my key with the same symptom description:
+
+  | Model | Result |
+  |---|---|
+  | `gemini-2.5-flash` | Retired for new API keys (404) |
+  | `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-flash-latest` | Rejected with 503 "high demand" at test time |
+  | **`gemini-3.5-flash`** | 7–12 s, thinks before answering, thorough results (includes a serious condition when relevant) |
+  | **`gemini-3.1-flash-lite`** | About 2 s, valid output, less depth |
+
+  `gemini-3.5-flash` gives the best answers among the models that were reliably available, so it is the primary. The trade-off against flash-lite is about 8 extra seconds per new query, which the cache removes for repeat queries.
+- **Automatic model fallback.** Popular models are sometimes overloaded. If the primary model returns 429/5xx, can't be reached, or uses up its share of the time budget (45 s total, split across the models), the same request goes to the next model in `GEMINI_FALLBACK_MODELS`. Configuration errors such as a bad key or a missing model are reported straight away instead of falling back, so they don't get hidden. I tested this live: with an overloaded primary, the fallback answered and the patient still got a result. The trade-off is that a result may come from the lighter model. Because of that, the cache key uses the whole model chain, and the server logs which model answered.
+- **Everything is configurable.** `GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS` and `LLM_TIMEOUT_SECONDS` are environment variables, so models can be changed as Google releases or retires them, without code changes. The deterministic red-flag screen and the "include serious conditions" prompt instruction reduce the risk of a fast model missing something serious.
 - **Structured output, not free text.** Gemini is given the JSON schema generated from the Pydantic `Analysis` model (`response_json_schema`). The UI can rely on fields like `urgency` and `conditions[]` instead of parsing prose. The response is validated again with Pydantic, so if it still doesn't match, the patient gets a clean `502` instead of a broken page.
 - **"Not symptoms" is part of the schema.** The model sets `recognizedAsSymptoms: false` for input like a poem request or a test string, and the API turns that into a `422` with guidance. Length rules alone can't catch this.
 - **Prompt-injection stance.** Patient text goes inside `<symptoms>` tags, and the system instruction tells the model to treat it as data. The output schema also limits what an injected instruction could produce.
@@ -139,8 +150,9 @@ All errors use one shape: `{ "error": { "code", "message", "details?" } }`. JSON
 | Empty, too short or too long input, malformed JSON | 400 | A specific message under the field |
 | Input that isn't symptoms | 422 | *"We couldn't identify any symptoms…"* with an example |
 | Too many requests | 429 | *"Please wait a minute"*, with a `Retry-After` header |
-| Gemini rate-limited, overloaded or unreachable | 503 / 504 | *"Busy, try again."* The SDK already retries with backoff, all within one overall timeout. |
-| Bad API key, blocked or invalid output | 502 | A generic message. Details go to the server log only. |
+| Gemini rate-limited, overloaded or unreachable | 503 / 504 | First the fallback model is tried. If every model fails: *"Busy, try again."* |
+| Bad API key or unknown model name | 502 | *"Not configured correctly."* No fallback, so the problem is visible. Details go to the server log only. |
+| Blocked or invalid model output | 502 | *"Please rephrase."* Details go to the server log only. |
 | Anything unexpected | 500 | A generic message. Internal details are never returned. |
 
 If the model fails but the red-flag screen matched, the error response still carries `details.redFlags`, and the UI shows the emergency warning.
@@ -154,17 +166,32 @@ If the model fails but the red-flag screen matched, the error response still car
 
 ## Testing
 
-`pytest` runs 48 tests in about 2 s, all offline:
+`pytest` runs 52 tests in about 2 s, all offline:
 
 - **Validation:** empty input, whitespace only, missing field, minimum and maximum length, no words, optional fields.
 - **Cache:** TTL expiry (with an injected clock), LRU eviction, key normalisation, key separation by model and prompt version.
 - **Service:** cache hits skip the model and come back faster, concurrent requests are merged, failures are not cached, red flags survive an outage, non-symptom input is rejected.
-- **Gemini provider:** request shape (model, prompt, JSON schema), malformed, incomplete, truncated and safety-blocked responses, timeouts, and mapping of SDK errors (rate limit, server error, invalid key, network) to HTTP statuses.
+- **Gemini provider:** request shape (model, prompt, JSON schema); malformed, incomplete, truncated and safety-blocked responses; timeouts; fallback when the primary model is overloaded or slow, and no fallback on configuration errors; and mapping of SDK errors (rate limit, server error, invalid key, missing model, network) to HTTP statuses.
 - **HTTP:** end-to-end through FastAPI with an in-memory database. This covers each acceptance criterion, history scoping between clients, rate limiting, security headers, and that internal error details never leak.
+
+### Manual testing with the real model
+
+These checks ran through the running app with a real Gemini key:
+
+| Input | Result |
+|---|---|
+| Sore throat, mild fever, runny nose, tired (age 28) | 201 in 11 s. Common cold (high), COVID-19/flu (moderate), strep throat (low). Urgency: self-care. |
+| Same text with different punctuation | 201 in **0.0 s**, served from cache |
+| Crushing chest pain into the left arm, sweating, short of breath (58, male) | Urgency **emergency**. Heart attack (high). Red-flag banner shown. |
+| "Please write me a short poem about the ocean" | 422, *"couldn't identify any symptoms"* |
+| One-sided throbbing headache, nausea, light sensitivity | Migraine (high). Urgency: see a doctor. |
+| Burning urination and frequency (31, female), in the browser | UTI (high). Urgency: see a doctor. Rendered correctly at 375 px. |
+| Empty input | 400, *"Please describe your symptoms."* |
+| Primary model overloaded (forced) | Fallback model answered |
 
 ## Limitations and next steps
 
-- I did not run an automated evaluation against a set of clinical vignettes. Before real use, I would build one (for example, checking that serious conditions are never missed) and use it to choose the model and tune the prompt.
+- Answers from the real model were checked by hand (see above), but I did not run an automated evaluation against a set of clinical vignettes. Before real use, I would build one (for example, checking that serious conditions are never missed) and use it to choose the model and tune the prompt.
 - The red-flag list is English only and keyword based. It is a safety net, not a classifier.
 - Single instance only: the cache, the rate limiter and the database are all local to one process (see the trade-offs above for how to scale).
 - No authentication (see *History and privacy*).
@@ -179,7 +206,8 @@ If the model fails but the red-flag screen matched, the error response still car
 - Finding the right `google-genai` SDK calls (`aio.models.generate_content`, `response_json_schema`, error classes, retry options) by reading the installed SDK's source and type definitions.
 
 **What was verified or changed afterwards:**
-- `ruff` and `mypy --strict` pass, and all 48 tests pass.
+- `ruff` and `mypy --strict` pass, and all 52 tests pass.
+- Tested end to end with a real Gemini key (see *Manual testing with the real model*).
 - The UI was used in a real browser against both back ends: empty submission, a valid submission, a repeat submission served from cache (1.5 s → <1 ms), the history page, Clear history, the emergency banner, and a 375 px mobile width (no horizontal scroll).
 - Bugs found and fixed during that review:
   - The loading spinner showed while it was supposed to be hidden, because CSS `display:flex` overrode the `hidden` attribute.
@@ -188,4 +216,7 @@ If the model fails but the red-flag screen matched, the error response still car
   - When the model's output failed schema validation, the API returned a 500 instead of a 502.
   - *Clear history* did nothing in some embedded browsers, which block `window.confirm()`. It now uses an in-page confirmation bar.
   - The rate limiter was module-global, so it was shared across app instances and tests. It is now created per app.
-- _TODO (author): add your own review notes here, e.g. what you read line by line, what you changed, and what you tested with the real Gemini key._
+  - Found during live testing: the original default model, `gemini-2.5-flash`, is retired for new keys, and the newest Flash models were overloaded. This led to the model comparison and the automatic fallback described above.
+  - Found during live testing: a missing model was reported to patients as *"please rephrase"*. It is now reported as a configuration error.
+  - Found during live testing: a hung model held the request for 30 s before falling back. The total time budget was lowered from 60 s to 45 s.
+- _TODO (author): add your own review notes here, e.g. what you read line by line and what you changed._
