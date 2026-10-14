@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 
+    # 127.0.0.1 = this computer only; 0.0.0.0 = also reachable from other devices on your network.
+    host: str = "127.0.0.1"
     port: int = Field(default=8000, gt=0)
     db_path: str = "./data/healthai.db"
 
