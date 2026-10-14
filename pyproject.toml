@@ -1,0 +1,23 @@
+[project]
+name = "healthai"
+version = "1.0.0"
+description = "AI-powered symptom checker (HealthAI take-home)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:google.genai.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["app"]
+plugins = ["pydantic.mypy"]

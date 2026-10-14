@@ -1,6 +1,15 @@
-node_modules/
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local data and secrets
 data/*.db*
 .env
+
+# Editor / OS / tooling
 .DS_Store
-coverage/
 .claude/
