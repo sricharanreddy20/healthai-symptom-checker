@@ -35,7 +35,7 @@ All settings are listed in [`.env.example`](.env.example). They are validated at
 | **Must:** symptom input UI | [`public/index.html`](public/index.html), [`public/app.js`](public/app.js) | Type symptoms and press *Check symptoms*. Age and sex are optional. |
 | **Must:** LLM returns potential diagnoses | [`src/llm/anthropicProvider.ts`](src/llm/anthropicProvider.ts) | Results show 2–5 conditions, each with a likelihood, an explanation and a next step, plus an urgency level. |
 | **Must:** validation (not empty, min length) | [`src/domain/schemas.ts`](src/domain/schemas.ts) (server), `validateSymptoms` in `app.js` (client) | Submitting an empty field shows *"Please describe your symptoms."* Text that is under 10 characters, over 1000 characters, or has no words is also rejected. |
-| **Should:** history | [`src/history/historyRepository.ts`](src/history/historyRepository.ts), the *History* tab | Every check is saved. Click an entry to expand the full result. *Clear history* deletes them all. |
+| **Should:** history | [`src/history/historyRepository.ts`](src/history/historyRepository.ts), the *History* tab | Every check is saved. Click an entry to expand the full result. *Clear history* deletes them all, after an in-page confirmation. |
 | **Should:** caching | [`src/cache/`](src/cache), [`src/services/symptomService.ts`](src/services/symptomService.ts) | Submit the same symptoms twice. The second result shows *"⚡ From cache in <1 ms"*. `GET /api/cache/stats` shows hit and miss counts. |
 | **Must:** architecture and trade-offs documented | This README | See below. |
 | **Could:** responsive | [`public/styles.css`](public/styles.css) | Checked at 375 px wide with no horizontal scroll. Supports dark mode and reduced motion. |
@@ -177,5 +177,6 @@ Plain HTML, CSS and JavaScript (an ES module), with no framework and no build st
   - Mock results were not sorted by likelihood.
   - Labels were over-capitalised ("Moderate Likelihood").
   - When the model's JSON failed schema validation, the API returned a 500 instead of a 502.
+  - *Clear history* did nothing in some embedded browsers, which block `window.confirm()` and treat it as Cancel. It now uses an in-page confirmation bar instead.
 - **Not verified:** the Claude integration was only tested against a stubbed SDK client, because no API key was available during development. The first run with a real key should be checked by hand.
 - _TODO (author): add your own review notes here, e.g. what you read line by line, what you changed, and what you tested with a real API key._
