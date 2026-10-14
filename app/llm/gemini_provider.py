@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 # Gemini enforces this schema on its output (structured output / JSON mode).
 ANALYSIS_JSON_SCHEMA: dict[str, Any] = Analysis.model_json_schema(by_alias=True)
 
+_MISCONFIGURED = "The analysis service is not configured correctly. Please contact support."
+
 _BLOCKED_FINISH_REASONS = {
     types.FinishReason.SAFETY,
     types.FinishReason.PROHIBITED_CONTENT,
@@ -26,7 +29,12 @@ _BLOCKED_FINISH_REASONS = {
 
 
 class GeminiProvider:
-    """Calls Google Gemini with a JSON schema so the response always matches `Analysis`."""
+    """Calls Google Gemini with a JSON schema so the response always matches `Analysis`.
+
+    Popular Gemini models are sometimes overloaded (503 "high demand"). When the
+    primary model is unavailable or too slow, the same request is retried on the
+    fallback models in order, so the patient still gets an answer.
+    """
 
     def __init__(
         self,
@@ -34,14 +42,16 @@ class GeminiProvider:
         api_key: str | None,
         model: str,
         timeout_seconds: float,
+        fallback_models: Sequence[str] = (),
         client: genai.Client | None = None,
     ) -> None:
-        self._model = model
-        self._timeout_seconds = timeout_seconds
-        # The SDK retries rate limits, 5xx and connection errors with exponential backoff.
+        self._models = [model, *(m for m in fallback_models if m != model)]
+        # The time budget is split across the models so a fallback still has time to answer.
+        self._attempt_timeout = timeout_seconds / len(self._models)
+        # One SDK-level retry per model (with backoff) for brief 429/5xx blips.
         self._client = client or genai.Client(
             api_key=api_key,
-            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=3)),
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=2)),
         )
         self._config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -51,21 +61,27 @@ class GeminiProvider:
 
     @property
     def model_id(self) -> str:
-        return self._model
+        return "+".join(self._models)
 
     async def analyze(self, symptom_input: SymptomInput) -> Analysis:
-        try:
-            # One deadline for the whole call, including the SDK's retries.
-            async with asyncio.timeout(self._timeout_seconds):
-                response = await self._client.aio.models.generate_content(
-                    model=self._model,
-                    contents=render_user_message(symptom_input),
-                    config=self._config,
-                )
-        except Exception as exc:
-            raise map_sdk_error(exc) from exc
-
-        return parse_response(response)
+        contents = render_user_message(symptom_input)
+        for index, model in enumerate(self._models):
+            try:
+                async with asyncio.timeout(self._attempt_timeout):
+                    response = await self._client.aio.models.generate_content(
+                        model=model, contents=contents, config=self._config
+                    )
+            except Exception as exc:
+                error = map_sdk_error(exc)
+                is_last = index == len(self._models) - 1
+                if isinstance(error, LlmUnavailableError) and not is_last:
+                    logger.warning("Gemini model %s unavailable (%s); falling back", model, error.message)
+                    continue
+                raise error from exc
+            if index > 0:
+                logger.info("Answered by fallback model %s", model)
+            return parse_response(response)
+        raise LlmUnavailableError()  # unreachable: the loop always returns or raises
 
 
 def parse_response(response: types.GenerateContentResponse) -> Analysis:
@@ -105,7 +121,10 @@ def map_sdk_error(exc: Exception) -> Exception:
             return LlmUnavailableError()
         if exc.code in (400, 401, 403) and _looks_like_auth_error(exc):
             logger.error("Gemini rejected the credentials - check GEMINI_API_KEY")
-            return LlmFailedError("The analysis service is not configured correctly. Please contact support.")
+            return LlmFailedError(_MISCONFIGURED)
+        if exc.code == 404:
+            logger.error("Gemini model not found - check GEMINI_MODEL: %s", exc.message)
+            return LlmFailedError(_MISCONFIGURED)
         logger.error("Gemini client error %s: %s", exc.code, exc.message)
         return LlmFailedError()
     if isinstance(exc, errors.ServerError):

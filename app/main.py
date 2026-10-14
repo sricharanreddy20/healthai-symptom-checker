@@ -40,6 +40,7 @@ def create_provider(settings: Settings) -> DiagnosisProvider:
         return GeminiProvider(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
+            fallback_models=settings.fallback_models,
             timeout_seconds=settings.llm_timeout_seconds,
         )
     return MockProvider(settings.mock_latency_seconds)
@@ -59,7 +60,7 @@ def create_app(settings: Settings | None = None, provider: DiagnosisProvider | N
         if settings.llm_provider == "mock":
             logger.info("No GEMINI_API_KEY set - running with the offline mock model (demo mode).")
         else:
-            logger.info("Using Gemini model %s", settings.gemini_model)
+            logger.info("Using Gemini model %s (fallbacks: %s)", settings.gemini_model, settings.fallback_models)
         yield
         history.close()
 

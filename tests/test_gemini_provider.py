@@ -21,20 +21,38 @@ def response(text: str | None, finish: types.FinishReason = types.FinishReason.S
     )
 
 
-def provider_returning(result: Any, sent: dict[str, Any] | None = None, timeout: float = 5) -> GeminiProvider:
-    """GeminiProvider with a stub client; only client.aio.models.generate_content is used."""
+def provider_returning(
+    result: Any,
+    sent: dict[str, Any] | None = None,
+    timeout: float = 5,
+    fallbacks: tuple[str, ...] = (),
+    calls: list[str] | None = None,
+) -> GeminiProvider:
+    """GeminiProvider with a stub client; only client.aio.models.generate_content is used.
+
+    `result` may be a dict of model name -> result to give each model a different outcome.
+    """
 
     async def generate_content(**kwargs: Any) -> Any:
         if sent is not None:
             sent.update(kwargs)
-        if isinstance(result, BaseException):
-            raise result
-        if callable(result):
-            return await result()
-        return result
+        if calls is not None:
+            calls.append(kwargs["model"])
+        outcome = result[kwargs["model"]] if isinstance(result, dict) else result
+        return await _resolve(outcome)
 
     client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
-    return GeminiProvider(api_key="test", model="gemini-test", timeout_seconds=timeout, client=client)  # type: ignore[arg-type]
+    return GeminiProvider(  # type: ignore[arg-type]
+        api_key="test", model="gemini-test", timeout_seconds=timeout, fallback_models=fallbacks, client=client
+    )
+
+
+async def _resolve(result: Any) -> Any:
+    if isinstance(result, BaseException):
+        raise result
+    if callable(result):
+        return await result()
+    return result
 
 
 async def test_sends_schema_constrained_request_and_parses_json() -> None:
@@ -77,6 +95,42 @@ async def test_slow_responses_time_out_with_504() -> None:
     assert info.value.status == 504
 
 
+OK = response(SAMPLE_ANALYSIS.model_dump_json(by_alias=True))
+
+
+async def test_falls_back_when_primary_model_is_overloaded() -> None:
+    calls: list[str] = []
+    overloaded = api_error(errors.ServerError, 503, "high demand")
+    provider = provider_returning({"gemini-test": overloaded, "backup": OK}, fallbacks=("backup",), calls=calls)
+    assert await provider.analyze(SymptomInput(symptoms="sore throat and fever")) == SAMPLE_ANALYSIS
+    assert calls == ["gemini-test", "backup"]
+    assert provider.model_id == "gemini-test+backup"
+
+
+async def test_falls_back_when_primary_model_is_too_slow() -> None:
+    async def slow() -> None:
+        await asyncio.sleep(1)
+
+    provider = provider_returning({"gemini-test": slow, "backup": OK}, timeout=0.2, fallbacks=("backup",))
+    assert await provider.analyze(SymptomInput(symptoms="sore throat and fever")) == SAMPLE_ANALYSIS
+
+
+async def test_does_not_fall_back_on_configuration_errors() -> None:
+    calls: list[str] = []
+    missing = api_error(errors.ClientError, 404, "model not found")
+    provider = provider_returning({"gemini-test": missing, "backup": OK}, fallbacks=("backup",), calls=calls)
+    with pytest.raises(LlmFailedError, match="not configured correctly"):
+        await provider.analyze(SymptomInput(symptoms="sore throat and fever"))
+    assert calls == ["gemini-test"]
+
+
+async def test_reports_unavailable_when_every_model_is_overloaded() -> None:
+    overloaded = api_error(errors.ServerError, 503, "high demand")
+    provider = provider_returning(overloaded, fallbacks=("backup",))
+    with pytest.raises(LlmUnavailableError):
+        await provider.analyze(SymptomInput(symptoms="sore throat and fever"))
+
+
 def api_error(cls: type[errors.APIError], code: int, message: str, reason: str | None = None) -> errors.APIError:
     error: dict[str, Any] = {"code": code, "message": message, "status": "X"}
     if reason:
@@ -98,7 +152,7 @@ def test_invalid_key_maps_to_502_without_leaking_details() -> None:
 
 
 def test_other_client_errors_map_to_502() -> None:
-    assert isinstance(map_sdk_error(api_error(errors.ClientError, 404, "model not found")), LlmFailedError)
+    assert isinstance(map_sdk_error(api_error(errors.ClientError, 400, "bad request")), LlmFailedError)
 
 
 def test_unknown_errors_pass_through() -> None:

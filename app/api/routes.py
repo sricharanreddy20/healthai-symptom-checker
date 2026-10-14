@@ -11,6 +11,7 @@ from app.services.symptom_service import SymptomService
 
 router = APIRouter(prefix="/api")
 
+
 def analyze_rate_limit(request: Request) -> None:
     """LLM calls cost money; cap them per IP."""
     request.app.state.rate_limiter(request)
