@@ -1,5 +1,7 @@
 # HealthAI Symptom Checker
 
+[![CI](https://github.com/sricharanreddy20/healthai-symptom-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/sricharanreddy20/healthai-symptom-checker/actions/workflows/ci.yml)
+
 A web app where patients describe their symptoms in plain language and get back a structured, AI-generated list of potential conditions, an urgency level, and next steps. Built for HealthAI, a fictional health-tech startup.
 
 > HealthAI gives general information. It is not medical advice and does not make a diagnosis. The app says this on every page.
@@ -26,6 +28,8 @@ pytest              # 52 tests, no network needed
 ruff check .        # lint
 mypy                # strict type check
 ```
+
+The same three checks run automatically on GitHub Actions for every push and pull request, on Python 3.11 and 3.13 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). They run offline with the mock model, so no API key or secret is needed in CI.
 
 To try it from a phone on the same Wi-Fi, start it with `HOST=0.0.0.0 python -m app` and open `http://<your-computer's-IP>:8000` on the phone. (On a Mac, `ipconfig getifaddr en0` shows the IP.)
 
