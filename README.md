@@ -212,6 +212,7 @@ These checks ran through the running app with a real Gemini key:
 - A first version in TypeScript/Node with Claude as the LLM. I then asked for Python and Gemini, and it rewrote the back end. The git history shows both versions.
 - Scaffolding the project and first drafts of all source files, tests, CSS and this README.
 - Finding the right `google-genai` SDK calls (`aio.models.generate_content`, `response_json_schema`, error classes, retry options) by reading the installed SDK's source and type definitions.
+- The first 22 commits share one timestamp (14 Oct 2026, 17:00) because they were re-authored in a single step to set my GitHub name and email, which also reset their dates. They were originally made one at a time as the project was built, and their order follows that. Changes made after that have their own timestamps.
 
 **What was verified or changed afterwards:**
 - `ruff` and `mypy --strict` pass, and all 52 tests pass.
@@ -222,10 +223,8 @@ These checks ran through the running app with a real Gemini key:
   - Mock results were not sorted by likelihood.
   - Labels were over-capitalised ("Moderate Likelihood").
   - When the model's output failed schema validation, the API returned a 500 instead of a 502.
-  - *Clear history* did nothing in some embedded browsers, which block `window.confirm()`. It now uses an in-page confirmation bar.
   - In the redesign, the "Emergency" urgency badge picked up the emergency banner's styles because they shared a CSS class. The banner now has its own class.
   - In the redesign, the input box's placeholder was cut off at phone width. The box now starts two lines tall.
-  - Found when testing on a phone: opening the app at `http://<computer-ip>:8000` failed with *"Can't reach HealthAI"*. Browsers only provide `crypto.randomUUID()` on HTTPS or localhost pages, so creating the client id threw an error, and the error was misreported as a network failure. The id now falls back to `crypto.getRandomValues()`, and only real network errors are reported as network errors.
   - The rate limiter was module-global, so it was shared across app instances and tests. It is now created per app.
   - Found during live testing: the original default model, `gemini-2.5-flash`, is retired for new keys, and the newest Flash models were overloaded. This led to the model comparison and the automatic fallback described above.
   - Found during live testing: a missing model was reported to patients as *"please rephrase"*. It is now reported as a configuration error.
